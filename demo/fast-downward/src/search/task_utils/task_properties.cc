@@ -1,7 +1,6 @@
 #include "task_properties.h"
 
 #include "../utils/logging.h"
-#include "../utils/memory.h"
 #include "../utils/system.h"
 
 #include <algorithm>
@@ -10,7 +9,6 @@
 
 using namespace std;
 using utils::ExitCode;
-
 
 namespace task_properties {
 bool is_unit_cost(TaskProxy task) {
@@ -27,12 +25,11 @@ bool has_axioms(TaskProxy task) {
 
 void verify_no_axioms(TaskProxy task) {
     if (has_axioms(task)) {
-        cerr << "This configuration does not support axioms!"
-             << endl << "Terminating." << endl;
+        cerr << "This configuration does not support axioms!" << endl
+             << "Terminating." << endl;
         utils::exit_with(ExitCode::SEARCH_UNSUPPORTED);
     }
 }
-
 
 static int get_first_conditional_effects_op_id(TaskProxy task) {
     for (OperatorProxy op : task.get_operators()) {
@@ -111,7 +108,8 @@ void print_variable_statistics(const TaskProxy &task_proxy) {
     utils::g_log << "Variables: " << variables.size() << endl;
     utils::g_log << "FactPairs: " << num_facts << endl;
     utils::g_log << "Bytes per state: "
-                 << state_packer.get_num_bins() * sizeof(int_packer::IntPacker::Bin)
+                 << state_packer.get_num_bins() *
+                        sizeof(int_packer::IntPacker::Bin)
                  << endl;
 }
 
@@ -126,8 +124,8 @@ void dump_pddl(const State &state) {
 void dump_fdr(const State &state) {
     for (FactProxy fact : state) {
         VariableProxy var = fact.get_variable();
-        utils::g_log << "  #" << var.get_id() << " [" << var.get_name() << "] -> "
-                     << fact.get_value() << endl;
+        utils::g_log << "  #" << var.get_id() << " [" << var.get_name()
+                     << "] -> " << fact.get_value() << endl;
     }
 }
 
@@ -153,10 +151,11 @@ void dump_task(const TaskProxy &task_proxy) {
     VariablesProxy variables = task_proxy.get_variables();
     utils::g_log << "Variables (" << variables.size() << "):" << endl;
     for (VariableProxy var : variables) {
-        utils::g_log << "  " << var.get_name()
-                     << " (range " << var.get_domain_size() << ")" << endl;
+        utils::g_log << "  " << var.get_name() << " (range "
+                     << var.get_domain_size() << ")" << endl;
         for (int val = 0; val < var.get_domain_size(); ++val) {
-            utils::g_log << "    " << val << ": " << var.get_fact(val).get_name() << endl;
+            utils::g_log << "    " << val << ": "
+                         << var.get_fact(val).get_name() << endl;
         }
     }
     State initial_state = task_proxy.get_initial_state();
@@ -175,7 +174,6 @@ PerTaskInformation<int_packer::IntPacker> g_state_packers(
         for (VariableProxy var : variables) {
             variable_ranges.push_back(var.get_domain_size());
         }
-        return utils::make_unique_ptr<int_packer::IntPacker>(variable_ranges);
-    }
-    );
+        return make_unique<int_packer::IntPacker>(variable_ranges);
+    });
 }

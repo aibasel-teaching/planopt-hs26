@@ -16,14 +16,12 @@ using namespace std;
 
 namespace landmarks {
 LandmarkCostPartitioningHeuristic::LandmarkCostPartitioningHeuristic(
-    const shared_ptr<LandmarkFactory> &lm_factory, bool pref,
-    bool prog_goal, bool prog_gn, bool prog_r,
-    const shared_ptr<AbstractTask> &transform, bool cache_estimates,
-    const string &description, utils::Verbosity verbosity,
-    CostPartitioningMethod cost_partitioning, bool alm,
-    lp::LPSolverType lpsolver)
-    : LandmarkHeuristic(
-          pref, transform, cache_estimates, description, verbosity) {
+    const shared_ptr<AbstractTask> &task,
+    const shared_ptr<LandmarkFactory> &lm_factory, bool pref, bool prog_goal,
+    bool prog_gn, bool prog_r, bool cache_estimates, const string &description,
+    utils::Verbosity verbosity, CostPartitioningMethod cost_partitioning,
+    bool alm, lp::LPSolverType lpsolver)
+    : LandmarkHeuristic(task, pref, cache_estimates, description, verbosity) {
     if (log.is_at_least_normal()) {
         log << "Initializing landmark cost partitioning heuristic..." << endl;
     }
@@ -33,14 +31,14 @@ LandmarkCostPartitioningHeuristic::LandmarkCostPartitioningHeuristic(
 }
 
 void LandmarkCostPartitioningHeuristic::check_unsupported_features(
-    const shared_ptr<LandmarkFactory> &lm_factory) {
+    const shared_ptr<LandmarkFactory> &landmark_factory) {
     if (task_properties::has_axioms(task_proxy)) {
         cerr << "Cost partitioning does not support axioms." << endl;
         utils::exit_with(utils::ExitCode::SEARCH_UNSUPPORTED);
     }
 
-    if (!lm_factory->supports_conditional_effects()
-        && task_properties::has_conditional_effects(task_proxy)) {
+    if (!landmark_factory->supports_conditional_effects() &&
+        task_properties::has_conditional_effects(task_proxy)) {
         cerr << "Conditional effects not supported by the landmark "
              << "generation method." << endl;
         utils::exit_with(utils::ExitCode::SEARCH_UNSUPPORTED);
@@ -48,18 +46,18 @@ void LandmarkCostPartitioningHeuristic::check_unsupported_features(
 }
 
 void LandmarkCostPartitioningHeuristic::set_cost_partitioning_algorithm(
-    CostPartitioningMethod cost_partitioning, lp::LPSolverType lpsolver,
-    bool alm) {
+    const CostPartitioningMethod cost_partitioning, lp::LPSolverType lpsolver,
+    bool use_action_landmarks) {
     if (cost_partitioning == CostPartitioningMethod::OPTIMAL) {
         cost_partitioning_algorithm =
-            utils::make_unique_ptr<OptimalCostPartitioningAlgorithm>(
+            make_unique<OptimalCostPartitioningAlgorithm>(
                 task_properties::get_operator_costs(task_proxy),
-                *lm_graph, lpsolver);
+                *landmark_graph, lpsolver);
     } else if (cost_partitioning == CostPartitioningMethod::UNIFORM) {
         cost_partitioning_algorithm =
-            utils::make_unique_ptr<UniformCostPartitioningAlgorithm>(
+            make_unique<UniformCostPartitioningAlgorithm>(
                 task_properties::get_operator_costs(task_proxy),
-                *lm_graph, alm);
+                *landmark_graph, use_action_landmarks);
     } else {
         ABORT("Unknown cost partitioning method");
     }
@@ -67,11 +65,11 @@ void LandmarkCostPartitioningHeuristic::set_cost_partitioning_algorithm(
 
 int LandmarkCostPartitioningHeuristic::get_heuristic_value(
     const State &ancestor_state) {
-    double epsilon = 0.01;
+    constexpr double epsilon = 0.01;
 
     double h_val =
         cost_partitioning_algorithm->get_cost_partitioned_heuristic_value(
-            *lm_status_manager, ancestor_state);
+            *landmark_status_manager, ancestor_state);
     if (h_val == numeric_limits<double>::max()) {
         return DEAD_END;
     } else {
@@ -79,38 +77,18 @@ int LandmarkCostPartitioningHeuristic::get_heuristic_value(
     }
 }
 
-bool LandmarkCostPartitioningHeuristic::dead_ends_are_reliable() const {
+bool LandmarkCostPartitioningHeuristic::is_safe() const {
+    /* Since check_unsupported_features prevents instantiating this heuristic
+       on tasks where it could be unsafe, we can return true here. */
     return true;
 }
 
 class LandmarkCostPartitioningHeuristicFeature
-    : public plugins::TypedFeature<Evaluator, LandmarkCostPartitioningHeuristic> {
+    : public plugins::TypedFeature<TaskIndependentEvaluator> {
 public:
-    LandmarkCostPartitioningHeuristicFeature() : TypedFeature("landmark_cost_partitioning") {
+    LandmarkCostPartitioningHeuristicFeature()
+        : TypedFeature("landmark_cost_partitioning") {
         document_title("Landmark cost partitioning heuristic");
-        document_synopsis(
-            "Formerly known as the admissible landmark heuristic.\n"
-            "See the papers" +
-            utils::format_conference_reference(
-                {"Erez Karpas", "Carmel Domshlak"},
-                "Cost-Optimal Planning with Landmarks",
-                "https://www.ijcai.org/Proceedings/09/Papers/288.pdf",
-                "Proceedings of the 21st International Joint Conference on "
-                "Artificial Intelligence (IJCAI 2009)",
-                "1728-1733",
-                "AAAI Press",
-                "2009") +
-            "and" +
-            utils::format_conference_reference(
-                {"Emil Keyder and Silvia Richter and Malte Helmert"},
-                "Sound and Complete Landmarks for And/Or Graphs",
-                "https://ai.dmi.unibas.ch/papers/keyder-et-al-ecai2010.pdf",
-                "Proceedings of the 19th European Conference on Artificial "
-                "Intelligence (ECAI 2010)",
-                "335-340",
-                "IOS Press",
-                "2010"));
-
         /*
           We usually have the options of base classes behind the options
           of specific implementations. In the case of landmark
@@ -129,6 +107,25 @@ public:
         lp::add_lp_solver_option_to_feature(*this);
 
         document_note(
+            "History Note",
+            "Formerly known as the admissible landmark heuristic.\n"
+            "See the papers" +
+                utils::format_conference_reference(
+                    {"Erez Karpas", "Carmel Domshlak"},
+                    "Cost-Optimal Planning with Landmarks",
+                    "https://www.ijcai.org/Proceedings/09/Papers/288.pdf",
+                    "Proceedings of the 21st International Joint Conference on "
+                    "Artificial Intelligence (IJCAI 2009)",
+                    "1728-1733", "AAAI Press", "2009") +
+                "and" +
+                utils::format_conference_reference(
+                    {"Emil Keyder and Silvia Richter and Malte Helmert"},
+                    "Sound and Complete Landmarks for And/Or Graphs",
+                    "https://ai.dmi.unibas.ch/papers/keyder-et-al-ecai2010.pdf",
+                    "Proceedings of the 19th European Conference on Artificial "
+                    "Intelligence (ECAI 2010)",
+                    "335-340", "IOS Press", "2010"));
+        document_note(
             "Usage with A*",
             "We recommend to add this heuristic as lazy_evaluator when using "
             "it in the A* algorithm. This way, the heuristic is recomputed "
@@ -144,14 +141,15 @@ public:
             "which point the above inequality might not hold anymore.");
         document_note(
             "Optimal Cost Partitioning",
-            "To use ``cost_partitioning=optimal``, you must build the planner with LP "
-            "support. See [build instructions https://github.com/aibasel/downward/blob/main/BUILD.md].");
+            "To use ``cost_partitioning=optimal``, you must build the "
+            "planner with LP support. See "
+            "[build instructions https://github.com/aibasel/downward/blob/main/BUILD.md].");
         document_note(
             "Preferred operators",
-            "Preferred operators should not be used for optimal planning. "
-            "See Evaluator#Landmark_sum_heuristic for more information "
-            "on using preferred operators; the comments there also apply "
-            "to this heuristic.");
+            "Preferred operators should not be used for optimal planning. See "
+            "Evaluator#Landmark_sum_heuristic for more information on using "
+            "preferred operators; the comments there also apply to this "
+            "heuristic.");
 
         document_language_support("action costs", "supported");
         document_language_support(
@@ -161,30 +159,27 @@ public:
         document_language_support("axioms", "not allowed");
 
         document_property("admissible", "yes");
-        document_property("consistent",
-                          "no; see document note about consistency");
+        document_property(
+            "consistent", "no; see document note about consistency");
         document_property("safe", "yes");
     }
 
-    virtual shared_ptr<LandmarkCostPartitioningHeuristic>
-    create_component(const plugins::Options &opts,
-                     const utils::Context &) const override {
-        return plugins::make_shared_from_arg_tuples<LandmarkCostPartitioningHeuristic>(
+    virtual shared_ptr<TaskIndependentEvaluator> create_component(
+        const plugins::Options &opts) const override {
+        return components::make_auto_task_independent_component<
+            LandmarkCostPartitioningHeuristic, Evaluator>(
             get_landmark_heuristic_arguments_from_options(opts),
             opts.get<CostPartitioningMethod>("cost_partitioning"),
             opts.get<bool>("alm"),
-            lp::get_lp_solver_arguments_from_options(opts)
-            );
+            lp::get_lp_solver_arguments_from_options(opts));
     }
 };
 
 static plugins::FeaturePlugin<LandmarkCostPartitioningHeuristicFeature> _plugin;
 
 static plugins::TypedEnumPlugin<CostPartitioningMethod> _enum_plugin({
-        {"optimal",
-         "use optimal (LP-based) cost partitioning"},
-        {"uniform",
-         "partition operator costs uniformly among all landmarks "
-         "achieved by that operator"},
-    });
+    {"optimal", "use optimal (LP-based) cost partitioning"},
+    {"uniform", "partition operator costs uniformly among all landmarks "
+                "achieved by that operator"},
+});
 }

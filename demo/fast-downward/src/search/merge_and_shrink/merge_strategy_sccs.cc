@@ -15,16 +15,11 @@ using namespace std;
 namespace merge_and_shrink {
 MergeStrategySCCs::MergeStrategySCCs(
     const FactoredTransitionSystem &fts,
-    const TaskProxy &task_proxy,
-    const shared_ptr<MergeTreeFactory> &merge_tree_factory,
     const shared_ptr<MergeSelector> &merge_selector,
     vector<vector<int>> &&non_singleton_cg_sccs)
     : MergeStrategy(fts),
-      task_proxy(task_proxy),
-      merge_tree_factory(merge_tree_factory),
       merge_selector(merge_selector),
-      non_singleton_cg_sccs(move(non_singleton_cg_sccs)),
-      current_merge_tree(nullptr) {
+      non_singleton_cg_sccs(move(non_singleton_cg_sccs)) {
 }
 
 MergeStrategySCCs::~MergeStrategySCCs() {
@@ -40,7 +35,7 @@ pair<int, int> MergeStrategySCCs::get_next() {
         if (non_singleton_cg_sccs.empty()) {
             // We are done dealing with all SCCs, allow merging any factors.
             current_ts_indices.reserve(fts.get_num_active_entries());
-            for (int ts_index: fts) {
+            for (int ts_index : fts) {
                 current_ts_indices.push_back(ts_index);
             }
         } else {
@@ -53,31 +48,29 @@ pair<int, int> MergeStrategySCCs::get_next() {
             current_ts_indices = move(current_scc);
             non_singleton_cg_sccs.erase(non_singleton_cg_sccs.begin());
         }
-
-        // If using a merge tree factory, compute a merge tree for this set.
-        if (merge_tree_factory) {
-            current_merge_tree = merge_tree_factory->compute_merge_tree(
-                task_proxy, fts, current_ts_indices);
-        }
     } else {
         // Add the most recent product to the current index set.
         current_ts_indices.push_back(fts.get_size() - 1);
     }
 
-    // Select the next merge from the current index set, either using the
-    // tree or the selector.
-    pair<int, int > next_pair;
-    int merged_ts_index = fts.get_size();
-    if (current_merge_tree) {
-        assert(!current_merge_tree->done());
-        next_pair = current_merge_tree->get_next_merge(merged_ts_index);
-        if (current_merge_tree->done()) {
-            current_merge_tree = nullptr;
+    // Compute all merge candidates for the current set of indices.
+    vector<pair<int, int>> merge_candidates;
+    merge_candidates.reserve(
+        (current_ts_indices.size() * (current_ts_indices.size() - 1)) / 2);
+    assert(current_ts_indices.size() > 1);
+    for (size_t i = 0; i < current_ts_indices.size(); ++i) {
+        int ts_index1 = current_ts_indices[i];
+        assert(fts.is_active(ts_index1));
+        for (size_t j = i + 1; j < current_ts_indices.size(); ++j) {
+            int ts_index2 = current_ts_indices[j];
+            assert(fts.is_active(ts_index2));
+            merge_candidates.emplace_back(ts_index1, ts_index2);
         }
-    } else {
-        assert(merge_selector);
-        next_pair = merge_selector->select_merge(fts, current_ts_indices);
     }
+
+    // Select the next merge for the current set of indices.
+    pair<int, int> next_pair = merge_selector->select_merge_from_candidates(
+        fts, move(merge_candidates));
 
     // Remove the two merged indices from the current index set.
     for (vector<int>::iterator it = current_ts_indices.begin();
